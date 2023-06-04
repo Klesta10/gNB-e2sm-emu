@@ -6,6 +6,10 @@
 #include <stdbool.h>
 #define CONNECTED_UES 4
 
+
+// Global variables
+int threshold = 0;  // Default threshold value
+int ber = 0;       // Default BER value
 int gnb_id = 0;
 bool is_initialized = false;
 typedef struct {
@@ -27,6 +31,14 @@ void initialize_ues_if_needed(){
         connected_ue_list[ue].prop_2 = -1;
     }
     is_initialized = true;
+}
+
+void set_threshold(int value) {
+    threshold = value;
+}
+
+void set_ber(int value) {
+    ber = value;
 }
 
 /*
@@ -165,8 +177,34 @@ void ran_write(RANParamMapEntry* target_param_map_entry){
         case RAN_PARAMETER__UE_LIST: // if we receive a ue list message we need to apply its content
             apply_properties_to_ue_list(target_param_map_entry->ue_list);
             break;
+        case RAN_PARAMETER__BER:
+            set_ber(atoi(target_param_map_entry->string_value));
+            check_ber_threshold();
+            break;
+        case RAN_PARAMETER__THRESHOLD:
+            set_threshold(atoi(target_param_map_entry->string_value));
+            check_ber_threshold();
+            break;
         default:
             printf("ERROR: cannot write RAN, unrecognized target param %d\n", target_param_map_entry->key);
+    }
+}
+
+void check_ber_threshold() {
+    for (int ue = 0; ue < CONNECTED_UES; ue++) {
+        if (connected_ue_list[ue].ber > connected_ue_list[ue].threshold) {
+            // BER is higher than threshold, perform actions based on flag
+            if (connected_ue_list[ue].send_control_request) {
+                // Send control request action
+                printf("Sending control request for UE with RNTI %d\n", connected_ue_list[ue].rnti);
+                // Perform other control request actions
+            }
+            else {
+                // Other actions when control request is not needed
+                printf("Control request not needed for UE with RNTI %d\n", connected_ue_list[ue].rnti);
+                // Perform other actions as needed
+            }
+        }
     }
 }
 
@@ -178,6 +216,12 @@ void apply_properties_to_ue_list(UeListM* ue_list){
                           ue_list->ue_info[ue]->prop_1,
                           ue_list->ue_info[ue]->prop_2);
 
+        // apply BER and threshold properties
+        set_ue_ber_threshold(ue_list->ue_info[ue]->rnti,
+                             ue_list->ue_info[ue]->ber,
+                             ue_list->ue_info[ue]->threshold);
+
+        check_ber_threshold();
         // more stuff later when needed     
     }
 }
@@ -191,6 +235,26 @@ void set_ue_properties(int rnti, bool prop_1, float prop_2){
             printf("RNTI found\n");
             connected_ue_list[ue].prop_1 = prop_1;
             connected_ue_list[ue].prop_2 = prop_2;
+            rnti_not_found = false;
+            break;
+        } else {
+            continue;
+        }
+    }
+    if(rnti_not_found){
+        printf("RNTI %u not found\n", rnti);
+    }
+}
+
+
+void set_ue_ber_threshold(int rnti, float ber, int threshold) {
+    // iterate ue list until rnti is found
+    bool rnti_not_found = true;
+    for(int ue=0; ue<CONNECTED_UES; ue++) {
+        if(connected_ue_list[ue].rnti == rnti){
+            printf("RNTI found\n");
+            connected_ue_list[ue].ber = ber;
+            connected_ue_list[ue].threshold = threshold;
             rnti_not_found = false;
             break;
         } else {
@@ -324,6 +388,14 @@ void ran_read(RANParameter ran_par_enum, RANParamMapEntry* map_entry){
         case RAN_PARAMETER__UE_LIST:
             map_entry->value_case=RAN_PARAM_MAP_ENTRY__VALUE_UE_LIST;
             map_entry->ue_list = build_ue_list_message();
+            break;
+        case RAN_PARAMETER__BER:
+            map_entry->value_case = RAN_PARAM_MAP_ENTRY__VALUE_FLOAT_VALUE;
+            map_entry->float_value = get_ue_ber(map_entry->rnti);
+            break;
+        case RAN_PARAMETER__THRESHOLD:
+            map_entry->value_case = RAN_PARAM_MAP_ENTRY__VALUE_INT32_VALUE;
+            map_entry->int32_value = get_ue_threshold(map_entry->rnti);
             break;
         default:
             printf("Unrecognized param %d\n",ran_par_enum);
